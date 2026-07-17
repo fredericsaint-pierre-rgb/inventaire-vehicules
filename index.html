@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Inventaire véhicule</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 16px;
+      background: #f5f5f5;
+    }
+
+    .card {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin-top: 0;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 12px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .element {
+      border-top: 1px solid #ddd;
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+
+    .message {
+      font-weight: bold;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <h1>Inventaire véhicule</h1>
+    <p id="vehiculeLabel"></p>
+
+    <label for="agent">Nom de l’agent</label>
+    <input id="agent" type="text" placeholder="Ex : Dupont">
+
+    <label for="observationGenerale">Observation générale</label>
+    <textarea id="observationGenerale" placeholder="Observation éventuelle"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Éléments à contrôler</h2>
+    <div id="listeElements"></div>
+  </div>
+
+  <button onclick="envoyerInventaire()">Valider l’inventaire</button>
+
+  <p id="message" class="message"></p>
+
+  <script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxajc4_v2IHvAKMOv4HF04msRY0VlS9DA--3zbtDmM6pqZvOsIm_uDiaMXx_HvG0ioD/exec";
+    const SECRET_KEY = "inventaire_pompiers";
+
+    const referentiel = {
+      "VL": [
+        { id: "gilet", label: "Gilet haute visibilité" },
+        { id: "triangle", label: "Triangle de signalisation" },
+        { id: "trousse_secours", label: "Trousse de secours" },
+        { id: "constat", label: "Constat amiable" }
+      ],
+      "FOURGON": [
+        { id: "gilet", label: "Gilet haute visibilité" },
+        { id: "triangle", label: "Triangle de signalisation" },
+        { id: "cones", label: "Cônes de signalisation" },
+        { id: "outillage", label: "Caisse à outils" },
+        { id: "lampe", label: "Lampe" }
+      ]
+    };
+
+    const vehicules = {
+      "VL01": { nom: "Véhicule léger 01", type: "VL" },
+      "VL02": { nom: "Véhicule léger 02", type: "VL" },
+      "FOURGON01": { nom: "Fourgon technique 01", type: "FOURGON" }
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const idVehicule = params.get("vehicule");
+
+    const vehicule = vehicules[idVehicule];
+
+    if (!vehicule) {
+      document.getElementById("vehiculeLabel").innerText =
+        "Véhicule inconnu ou QR code incorrect.";
+    } else {
+      document.getElementById("vehiculeLabel").innerText =
+        vehicule.nom + " — " + idVehicule;
+
+      afficherElements(vehicule.type);
+    }
+
+    function afficherElements(typeVehicule) {
+      const container = document.getElementById("listeElements");
+      const elements = referentiel[typeVehicule] || [];
+
+      elements.forEach(element => {
+        const bloc = document.createElement("div");
+        bloc.className = "element";
+
+        bloc.innerHTML = `
+          <label>${element.label}</label>
+
+          <select data-id="${element.id}" data-label="${element.label}">
+            <option value="OK">OK</option>
+            <option value="Manquant">Manquant</option>
+            <option value="Défectueux">Défectueux</option>
+            <option value="Non concerné">Non concerné</option>
+          </select>
+
+          <textarea 
+            data-observation="${element.id}" 
+            placeholder="Observation pour ${element.label}">
+          </textarea>
+        `;
+
+        container.appendChild(bloc);
+      });
+    }
+
+    async function envoyerInventaire() {
+  const agent = document.getElementById("agent").value.trim();
+  const observationGenerale = document.getElementById("observationGenerale").value.trim();
+  const message = document.getElementById("message");
+
+  if (!agent) {
+    message.innerText = "Merci de renseigner le nom de l’agent.";
+    return;
+  }
+
+  if (!vehicule) {
+    message.innerText = "Impossible d’enregistrer : véhicule inconnu.";
+    return;
+  }
+
+  const selects = document.querySelectorAll("select");
+
+  const elements = Array.from(selects).map(select => {
+    const elementId = select.dataset.id;
+    const observationElement = document.querySelector(
+      `textarea[data-observation="${elementId}"]`
+    ).value.trim();
+
+    return {
+      element_id: elementId,
+      element: select.dataset.label,
+      statut: select.value,
+      observation: observationElement || observationGenerale
+    };
+  });
+
+  const payload = {
+    secret: SECRET_KEY,
+    agent: agent,
+    vehicule: idVehicule,
+    elements: elements
+  };
+
+  message.innerText = "Enregistrement en cours...";
+
+  fetch(SCRIPT_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(() => {
+    message.innerText = "Inventaire envoyé. Vérifie le Google Sheet.";
+  })
+  .catch(error => {
+    message.innerText = "Erreur lors de l’envoi : " + error.message;
+  });
+}
+  </script>
+
+</body>
+</html>
