@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Inventaire véhicule</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 16px;
+      background: #f5f5f5;
+      color: #222;
+    }
+
+    .card {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 18px;
+      margin-top: 0;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input, select, textarea, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 12px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    textarea {
+      min-height: 70px;
+    }
+
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+
+    .element {
+      border-top: 1px solid #ddd;
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+
+    .message {
+      font-weight: bold;
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .ok {
+      color: #137333;
+    }
+
+    .erreur {
+      color: #b3261e;
+    }
+
+    .info {
+      color: #174ea6;
+    }
+
+    .vehicule {
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    .petit {
+      font-size: 13px;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <h1>Inventaire véhicule</h1>
+    <p id="vehiculeLabel" class="vehicule"></p>
+    <p id="typeVehiculeLabel" class="petit"></p>
+
+    <label for="agent">Nom de l’agent</label>
+    <input id="agent" type="text" placeholder="Ex : Dupont">
+
+    <label for="observationGenerale">Observation générale</label>
+    <textarea id="observationGenerale" placeholder="Observation éventuelle pour tout le contrôle"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Éléments à contrôler</h2>
+    <div id="listeElements"></div>
+  </div>
+
+  <button id="boutonValidation" onclick="envoyerInventaire()" disabled>
+    Valider l’inventaire
+  </button>
+
+  <p id="message" class="message info">Chargement...</p>
+
+  <script>
+    /************************************************************
+     * 1. PARAMÈTRES À MODIFIER
+     ************************************************************/
+
+    // URL Apps Script qui finit par /exec
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxajc4_v2IHvAKMOv4HF04msRY0VlS9DA--3zbtDmM6pqZvOsIm_uDiaMXx_HvG0ioD/exec";
+
+    // Doit être strictement identique à la SECRET_KEY dans Apps Script
+    const SECRET_KEY = "inventaire_pompiers";
+
+
+    /************************************************************
+     * 2. VARIABLES GLOBALES
+     ************************************************************/
+
+    let vehicules = {};
+    let referentiel = {};
+    let vehicule = null;
+
+    const params = new URLSearchParams(window.location.search);
+    const idVehicule = params.get("vehicule");
+
+
+    /************************************************************
+     * 3. DÉMARRAGE
+     ************************************************************/
+
+    chargerConfiguration();
+
+
+    /************************************************************
+     * 4. CHARGEMENT DEPUIS GOOGLE SHEETS VIA APPS SCRIPT
+     ************************************************************/
+
+    async function chargerConfiguration() {
+      const message = document.getElementById("message");
+      const boutonValidation = document.getElementById("boutonValidation");
+
+      boutonValidation.disabled = true;
+
+      if (SCRIPT_URL === "COLLE_ICI_TON_URL_APPS_SCRIPT_EXEC") {
+        message.innerText = "Erreur : l’URL Apps Script n’a pas été renseignée dans index.html.";
+        message.className = "message erreur";
+        return;
+      }
+
+      if (SECRET_KEY === "COLLE_ICI_TA_CLE_SECRETE") {
+        message.innerText = "Erreur : la clé secrète n’a pas été renseignée dans index.html.";
+        message.className = "message erreur";
+        return;
+      }
+
+      message.innerText = "Chargement de la configuration depuis Google Sheets...";
+      message.className = "message info";
+
+      try {
+        const response = await fetch(SCRIPT_URL + "?action=config");
+        const config = await response.json();
+
+        if (!config.success) {
+          throw new Error(config.error || "Erreur de configuration");
+        }
+
+        vehicules = config.vehicules || {};
+        referentiel = config.referentiel || {};
+
+        vehicule = vehicules[idVehicule];
+
+        initialiserPage();
+
+      } catch (error) {
+        message.innerText = "Erreur de chargement de la configuration : " + error.message;
+        message.className = "message erreur";
+        boutonValidation.disabled = true;
+      }
+    }
+
+
+    /************************************************************
+     * 5. INITIALISATION DE LA PAGE
+     ************************************************************/
+
+    function initialiserPage() {
+      const vehiculeLabel = document.getElementById("vehiculeLabel");
+      const typeVehiculeLabel = document.getElementById("typeVehiculeLabel");
+      const boutonValidation = document.getElementById("boutonValidation");
+      const message = document.getElementById("message");
+
+      if (!idVehicule) {
+        vehiculeLabel.innerText = "Aucun véhicule indiqué dans l’URL.";
+        typeVehiculeLabel.innerText = "";
+        message.innerText = "Erreur : l’URL doit contenir ?vehicule=VL01 par exemple.";
+        message.className = "message erreur";
+        boutonValidation.disabled = true;
+        return;
+      }
+
+      if (!vehicule) {
+        vehiculeLabel.innerText = "Véhicule inconnu : " + idVehicule;
+        typeVehiculeLabel.innerText = "";
+        message.innerText = "Erreur : ce véhicule n’est pas déclaré dans l’onglet Vehicules du Google Sheet.";
+        message.className = "message erreur";
+        boutonValidation.disabled = true;
+        return;
+      }
+
+      vehiculeLabel.innerText = vehicule.nom + " — " + idVehicule;
+      typeVehiculeLabel.innerText = "Type : " + vehicule.type;
+
+      afficherElements(vehicule.type);
+
+      message.innerText = "Véhicule chargé. Tu peux réaliser le contrôle.";
+      message.className = "message info";
+      boutonValidation.disabled = false;
+    }
+
+
+    /************************************************************
+     * 6. AFFICHAGE DES ÉLÉMENTS À CONTRÔLER
+     ************************************************************/
+
+    function afficherElements(typeVehicule) {
+  const container = document.getElementById("listeElements");
+  const elements = referentiel[typeVehicule] || [];
+
+  container.innerHTML = "";
+
+  if (elements.length === 0) {
+    container.innerHTML = "<p>Aucun élément défini pour ce type de véhicule dans l’onglet Referentiel.</p>";
+    document.getElementById("boutonValidation").disabled = true;
+    return;
+  }
+
+  const elementsParZone = {};
+
+  elements.forEach(element => {
+    const zone = element.zone_rangement || "Sans zone définie";
+
+    if (!elementsParZone[zone]) {
+      elementsParZone[zone] = [];
+    }
+
+    elementsParZone[zone].push(element);
+  });
+
+  Object.keys(elementsParZone).forEach(zone => {
+    const zoneBloc = document.createElement("div");
+    zoneBloc.className = "card-zone";
+
+    const titreZone = document.createElement("h3");
+    titreZone.innerText = zone;
+    titreZone.style.marginTop = "18px";
+    titreZone.style.padding = "10px";
+    titreZone.style.background = "#e8f0fe";
+    titreZone.style.borderRadius = "8px";
+
+    container.appendChild(titreZone);
+
+    elementsParZone[zone].forEach(element => {
+      const bloc = document.createElement("div");
+      bloc.className = "element";
+
+      bloc.innerHTML = `
+        <label>${element.label}</label>
+
+        <select data-id="${element.id}" data-label="${element.label}">
+          <option value="OK">OK</option>
+          <option value="Manquant">Manquant</option>
+          <option value="Défectueux">Défectueux</option>
+          <option value="Non concerné">Non concerné</option>
+        </select>
+
+        <textarea
+          data-observation="${element.id}"
+          placeholder="Observation pour ${element.label}">
+        </textarea>
+      `;
+
+      container.appendChild(bloc);
+    });
+  });
+}
+
+
+    /************************************************************
+     * 7. ENVOI DE L’INVENTAIRE VERS GOOGLE SHEETS
+     ************************************************************/
+
+    async function envoyerInventaire() {
+      const agent = document.getElementById("agent").value.trim();
+      const observationGenerale = document.getElementById("observationGenerale").value.trim();
+      const message = document.getElementById("message");
+      const boutonValidation = document.getElementById("boutonValidation");
+
+      if (!agent) {
+        message.innerText = "Merci de renseigner le nom de l’agent.";
+        message.className = "message erreur";
+        return;
+      }
+
+      if (!vehicule) {
+        message.innerText = "Impossible d’enregistrer : véhicule inconnu.";
+        message.className = "message erreur";
+        return;
+      }
+
+      const selects = document.querySelectorAll("select");
+
+      if (selects.length === 0) {
+        message.innerText = "Impossible d’enregistrer : aucun élément à contrôler.";
+        message.className = "message erreur";
+        return;
+      }
+
+      const elements = Array.from(selects).map(select => {
+        const elementId = select.dataset.id;
+        const observationElement = document.querySelector(
+          `textarea[data-observation="${elementId}"]`
+        ).value.trim();
+
+        return {
+          element_id: elementId,
+          element: select.dataset.label,
+          statut: select.value,
+          observation: observationElement || observationGenerale
+        };
+      });
+
+      const payload = {
+        secret: SECRET_KEY,
+        agent: agent,
+        vehicule: idVehicule,
+        elements: elements
+      };
+
+      boutonValidation.disabled = true;
+      message.innerText = "Enregistrement en cours...";
+      message.className = "message info";
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        message.innerText = "Inventaire envoyé. Vérifie l’onglet Controles dans Google Sheets.";
+        message.className = "message ok";
+
+      } catch (error) {
+        message.innerText = "Erreur lors de l’envoi : " + error.message;
+        message.className = "message erreur";
+
+      } finally {
+        boutonValidation.disabled = false;
+      }
+    }
+
+
+    /************************************************************
+     * 8. TEST DIRECT OPTIONNEL
+     * À utiliser seulement si tu veux ajouter un bouton temporaire :
+     * <button onclick="testEnvoiDirect()">Test envoi direct</button>
+     ************************************************************/
+
+    async function testEnvoiDirect() {
+      const payload = {
+        secret: SECRET_KEY,
+        agent: "TEST_APPLICATION",
+        vehicule: "VL01",
+        elements: [
+          {
+            element_id: "test",
+            element: "Test depuis application",
+            statut: "OK",
+            observation: "Test direct depuis index.html"
+          }
+        ]
+      };
+
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      alert("Test envoyé. Vérifie le Google Sheet.");
+    }
+  </script>
+
+</body>
+</html>
